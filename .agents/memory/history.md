@@ -2,6 +2,84 @@
 
 Nhật ký theo dõi các mốc phát triển, thay đổi kiến trúc và trạng thái của dự án ShopFlow.
 
+## [2026-10-21] - Hoàn Thành TASK-22: Màn Hình Giao Diện Quản Lý Đơn Hàng & Vận Đơn (`orders-management-ui`) - Sprint 4 P0
+- **Tác giả:** System Architect & Full-Stack Engineer (Antigravity Ecosystem)
+- **Nội dung hoàn thành:**
+  - Hoàn thành toàn diện 8/8 tasks trong OpenSpec change [orders-management-ui](file:///c:/Users/Dell/Desktop/ShopFlow/openspec/changes/orders-management-ui/tasks.md) tương ứng **[TASK-22]** trên [Task.md](file:///c:/Users/Dell/Desktop/ShopFlow/Task.md).
+  - **Tầng Types & Defensive Normalizer (`frontend/src/types/order.ts`):**
+    - Khai báo types: `Order`, `OrderItem`, `OrderStatus` (5 trạng thái: `pending`, `confirmed`, `shipping`, `completed`, `cancelled`), `PaymentStatus` (`unpaid`, `paid`, `refunded`), `PaymentMethod` (`cod`, `vietqr`, `bank_transfer`), `OrderTimelineEvent`, `OrderMetrics`, `OrderPagination`.
+    - Xây dựng tiện ích che giấu thông tin cá nhân `maskPhoneNumber` (bảo vệ PII khách hàng theo quy chuẩn an toàn ShopFlow: `098****321`).
+    - Triển khai hàm phòng vệ `normalizeOrder` giải mã an toàn các trường JSON, mảng items và timeline.
+  - **Tầng Zustand State Store (`frontend/src/lib/order.store.ts`):**
+    - Quản lý trạng thái đa tầng: lọc trạng thái (`selectedStatus`), tìm kiếm debounced (`search`), phân trang (`pagination`).
+    - Kết nối REST APIs `/api/v1/orders` (danh sách và cập nhật trạng thái đơn hàng).
+    - Cập nhật Optimistic UI ngay lập tức khi chuyển đổi trạng thái đơn hàng và tự động rollback nếu server phản hồi lỗi.
+    - Lắng nghe sự kiện WebSocket realtime `ORDER_STATUS_CHANGED` và `NEW_ORDER_CREATED` để đồng bộ đơn hàng tức thời.
+    - Viết 13/13 unit tests tại `frontend/src/lib/__tests__/order.store.test.ts` đạt 100% pass.
+  - **Bộ UI Components Chuẩn Apple Bento & In Phiếu Giao Hàng:**
+    - `OrderStatusBadge` & `PaymentStatusBadge` (`frontend/src/components/orders/order-status-badge.tsx`): Hiển thị màu sắc Bento tinh gọn, hỗ trợ tùy chọn icon và kiểu hiển thị mini.
+    - `OrderMetrics` (`frontend/src/components/orders/order-metrics.tsx`): 4 thẻ Bento thống kê (Tổng đơn hôm nay, Tăng trưởng %, Đơn chờ xác nhận, Đang giao hàng, Doanh thu ước tính) kèm skeleton loading.
+    - `OrderTable` (`frontend/src/components/orders/order-table.tsx`): Bảng danh sách phong cách macOS Clean Utility, tab lọc ngang, ô tìm kiếm debounced, checkbox chọn hàng loạt và thanh điều hướng phân trang.
+    - `OrderDetailDrawer` (`frontend/src/components/orders/order-detail-drawer.tsx`): Slide-over drawer hiển thị chi tiết giỏ hàng, thông tin khách hàng (PII masked), địa chỉ giao hàng với nút 1-click sao chép vào clipboard, timeline lịch sử xử lý và các nút chuyển trạng thái nhanh (`Xác nhận đơn`, `Bàn giao vận chuyển`, `Giao thành công`, `Hủy đơn`).
+    - `OrderPrintModal` (`frontend/src/components/orders/order-print-modal.tsx`): Khung xem trước và in phiếu vận đơn/đóng gói chuẩn A5/A6 tối ưu máy in nhiệt cho shipper kèm CSS `@media print`.
+  - **Lắp Ráp Trang & Tích Hợp Điều Hướng:**
+    - Cập nhật `frontend/src/components/layout/sidebar.tsx` bổ sung menu `Quản lý đơn hàng` (`/orders`, icon `ShoppingBag`).
+    - Lắp ráp hoàn chỉnh trang chính tại `frontend/src/app/(dashboard)/orders/page.tsx` đồng bộ với `usePageStore`.
+    - Viết integration test suite tại `frontend/src/app/(dashboard)/orders/__tests__/orders.test.tsx` đạt 10/10 tests pass.
+  - **Chất Lượng Mã Nguồn & Kiểm Định:**
+    - Toàn bộ 23/23 tests cho phân hệ đơn hàng đạt 100% pass.
+    - Kiểm tra tĩnh kiểu dữ liệu `npx tsc --noEmit -p frontend/tsconfig.json` đạt **0 lỗi** (Strict Mode).
+    - Lưu trữ living specification tại [openspec/specs/orders-management/spec.md](file:///c:/Users/Dell/Desktop/ShopFlow/openspec/specs/orders-management/spec.md).
+
+## [2026-10-21] - Hoàn Thành TASK-21: Nghiệp Vụ Quản Lý Danh Mục Sản Phẩm, Biến Thể & Tồn Kho (`product-catalog-service`) - Sprint 4 P1
+- **Tác giả:** System Architect & Full-Stack Engineer (Antigravity Ecosystem)
+- **Nội dung hoàn thành:**
+  - Hoàn thành toàn diện 7/7 tasks trong OpenSpec change [product-catalog-service](file:///c:/Users/Dell/Desktop/ShopFlow/openspec/changes/archive/2026-10-21-product-catalog-service/tasks.md) tương ứng **[TASK-21]** trên [Task.md](file:///c:/Users/Dell/Desktop/ShopFlow/Task.md).
+  - **Database Migration & PostgreSQL Table (`002_products_and_inventory.sql`):**
+    - Tạo bảng `products` với các cột: `id` (UUID), `page_id` (UUID), `sku` (VARCHAR 50, UNIQUE per page), `name`, `description`, `price`, `original_price`, `stock_quantity`, `variants` (JSONB), `image_urls` (JSONB), `is_active`, `created_at`, `updated_at`.
+    - Thiết lập chỉ mục `idx_products_page_sku` (duy nhất trên từng Fanpage), `idx_products_page_active`, GIN index `idx_products_variants` cho biến thể và trigger tự động cập nhật `updated_at`.
+  - **Tầng DTOs & Zod Validation Schemas (`backend/src/api/dtos/product.dto.ts`):**
+    - Khai báo các schema: `ProductVariantSchema`, `CreateProductDtoSchema`, `UpdateProductDtoSchema`, `QueryProductsDtoSchema`, `AdjustStockDtoSchema`, `ProductItemDtoSchema`.
+    - Viết 9/9 unit tests cho DTOs tại `backend/src/api/dtos/__tests__/product.dto.test.ts` đạt 100% pass.
+  - **Tầng Product Repository & Atomic Decrement (`backend/src/infrastructure/repositories/product.repository.ts`):**
+    - Triển khai CRUD chuẩn: `create`, `findById`, `findBySku`, `findMany`, `update`, `delete`.
+    - Triển khai phương thức trừ tồn kho nguyên tử `atomicDecrementStock` sử dụng câu lệnh SQL điều kiện `stock_quantity = stock_quantity - $1 WHERE id = $2 AND stock_quantity >= $1 RETURNING *`, triệt tiêu hoàn toàn race condition và chống bán vượt tồn kho (overselling) khi có nhiều yêu cầu đồng thời.
+    - Hỗ trợ trừ tồn kho biến thể lồng nhau trong JSONB `variants`.
+    - Viết 8/8 unit tests tại `backend/src/infrastructure/repositories/__tests__/product.repository.test.ts` đạt 100% pass.
+  - **Tầng Product Service (`backend/src/core/services/product.service.ts`):**
+    - Quản lý nghiệp vụ kiểm tra SKU duy nhất trong cùng Fanpage (`SKU_ALREADY_EXISTS`), phân trang tìm kiếm, và điều chỉnh tồn kho.
+    - Viết 8/8 unit tests tại `backend/src/core/services/__tests__/product.service.test.ts` đạt 100% pass.
+  - **Tầng REST API Controller & Router (`backend/src/api/controllers/product.controller.ts`, `backend/src/api/routes/product.routes.ts`):**
+    - Đăng ký 6 REST API endpoints:
+      - `GET /api/v1/products`: Lấy danh sách sản phẩm theo Fanpage có phân trang và tìm kiếm.
+      - `POST /api/v1/products`: Tạo mới sản phẩm với kiểm tra trùng SKU.
+      - `GET /api/v1/products/:id`: Lấy chi tiết sản phẩm.
+      - `PUT /api/v1/products/:id`: Cập nhật thông tin sản phẩm.
+      - `DELETE /api/v1/products/:id`: Xóa sản phẩm.
+      - `PATCH /api/v1/products/:id/stock`: Điều chỉnh số lượng tồn kho (cộng/trừ kho an toàn).
+    - Viết 12/12 integration tests tại `backend/src/api/controllers/__tests__/product.controller.test.ts` đạt 100% pass.
+  - **Chất lượng mã nguồn & Kiểm định:**
+    - Toàn bộ backend test suite đạt **59/59 test files pass (494/494 tests pass 100%)**.
+    - Kiểm tra tĩnh kiểu dữ liệu `npx tsc --noEmit -p backend/tsconfig.json` đạt **0 lỗi** (Strict Mode).
+    - Lưu trữ living specification tại [openspec/specs/product-catalog/spec.md](file:///c:/Users/Dell/Desktop/ShopFlow/openspec/specs/product-catalog/spec.md).
+
+## [2026-10-21] - Hoàn Thành TASK-20: Mô-đun Trích Xuất Thực Thể Đơn Hàng Bằng Google Gemini AI (`order-ai-parser`) - Sprint 4 P0
+- **Tác giả:** System Architect & Full-Stack Engineer (Antigravity Ecosystem)
+- **Nội dung hoàn thành:**
+  - Hoàn thành toàn diện 7/7 tasks trong OpenSpec change [order-ai-parser](file:///c:/Users/Dell/Desktop/ShopFlow/openspec/changes/order-ai-parser/tasks.md) tương ứng **[TASK-20]** trên [Task.md](file:///c:/Users/Dell/Desktop/ShopFlow/Task.md).
+  - **Kiến trúc Hybrid 2 tầng (2-Tier Extraction Architecture):**
+    - **Tầng 1 (Regex Fast-path):** `RegexOrderParser` tại `backend/src/core/services/regex-order-parser.ts` xử lý tốc độ cực nhanh (< 50ms, benchmark ~0.24ms/req) với 0 chi phí token, trích xuất chính xác cú pháp `#SKU`, `[SKU]`, số lượng, màu sắc, size, số điện thoại và địa chỉ giao hàng tiếng Việt.
+    - **Tầng 2 (Gemini AI Fallback):** `GeminiClient` tại `backend/src/infrastructure/ai/gemini.client.ts` kết nối mô hình Google Gemini 2.5 Flash, structured JSON mode, timeout 8s với AbortController và bọc thẻ `<customer_input>` phòng vệ tuyệt đối chống prompt injection.
+    - **Dịch vụ Hợp nhất:** `OrderParserService` tại `backend/src/core/services/order-parser.service.ts` tự động ưu tiên Regex khi độ tin cậy `confidenceScore >= 0.8`, kích hoạt Gemini AI khi văn bản tự do phức tạp, và tự động giáng cấp (graceful degradation) về `regex_fallback` an toàn khi AI quá tải quota hoặc sự cố mạng.
+  - **Tầng REST API Endpoint & DTOs:**
+    - Khai báo DTOs và Zod validation schemas tại `backend/src/api/dtos/order-parser.dto.ts` (`ExtractedOrderEntity`, `ParseOrderInput`, `ParseOrderOutput`).
+    - Endpoint `POST /api/v1/orders/parse` với `OrderParserController` và `orderParserRouter` được đăng ký vào Router API v1 theo đúng chuẩn JSON Envelope `{ success: true, data: ..., message: ... }`.
+  - **Bộ Test Fixtures Thực Tế & Kiểm Định:**
+    - Xây dựng bộ 21 Golden Test Fixtures tại `backend/tests/fixtures/order-parser-cases.json` bao phủ toàn bộ các mẫu câu đặt hàng online thực tế của shop thời trang/B2C Việt Nam.
+    - Viết integration test suite `backend/tests/integration/order-parser.test.ts` đạt **100% test pass** (23/23 tests pass, độ chính xác đạt 100%).
+    - Toàn bộ backend test suite đạt **55/55 test files pass (457/457 tests pass 100%)**.
+    - Kiểm tra tĩnh kiểu dữ liệu `npx tsc --noEmit` đạt **0 lỗi** (Strict Mode).
+
 ## [2026-10-21] - Hoàn Thành TASK-19: Bảng Điều Khiển Tổng Quan & Báo Cáo KPIs (`dashboard-overview-ui`) & Kết Thúc Sprint 3
 - **Tác giả:** System Architect & Full-Stack Engineer (Antigravity Ecosystem)
 - **Nội dung hoàn thành:**
