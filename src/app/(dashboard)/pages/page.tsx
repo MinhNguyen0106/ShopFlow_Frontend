@@ -22,10 +22,12 @@ import {
   ChevronRight,
   AlertTriangle,
   Loader2,
+  Users,
 } from 'lucide-react';
 import { usePageStore, ConnectedPage } from '@/lib/page.store';
 import { apiClient } from '@/lib/api-client';
 import { ConnectPageModal } from '@/components/pages/connect-page-modal';
+import { PageMembersModal } from '@/components/pages/page-members-modal';
 
 export default function PagesManagementPage() {
   const router = useRouter();
@@ -41,11 +43,134 @@ export default function PagesManagementPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
+  const [memberModalPage, setMemberModalPage] = useState<ConnectedPage | null>(null);
   const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [oauthCallbackInfo, setOauthCallbackInfo] = useState<{
+    status: 'success' | 'cancel' | 'error';
+    message?: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchPages();
+  }, [fetchPages]);
+
+  // Xử lý khi tab này là tab callback sau khi Meta redirect về
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const oauthStatus = urlParams.get('oauth_status');
+    const oauthMessage = urlParams.get('message');
+    const fbUserId = urlParams.get('fb_user_id');
+
+    if (oauthStatus) {
+      const statusType: 'success' | 'cancel' | 'error' =
+        oauthStatus === 'success' ? 'success' : oauthStatus === 'cancel' ? 'cancel' : 'error';
+
+      setOauthCallbackInfo({
+        status: statusType,
+        message: oauthMessage || undefined,
+      });
+
+      const payload = {
+        type:
+          oauthStatus === 'success'
+            ? 'FB_OAUTH_SUCCESS'
+            : oauthStatus === 'cancel'
+            ? 'FB_OAUTH_CANCEL'
+            : 'FB_OAUTH_ERROR',
+        message: oauthMessage,
+        fbUserId,
+      };
+
+      // 1. BroadcastChannel (đồng bộ tức thì giữa các tab cùng origin)
+      try {
+        if ('BroadcastChannel' in window) {
+          const channel = new BroadcastChannel('shopflow_oauth');
+          channel.postMessage(payload);
+          channel.close();
+        }
+      } catch (err) {
+        console.error('Lỗi BroadcastChannel:', err);
+      }
+
+      // 2. localStorage event (fallback cho mọi trình duyệt)
+      try {
+        localStorage.setItem(
+          'shopflow_oauth_sync',
+          JSON.stringify({ ...payload, timestamp: Date.now() })
+        );
+      } catch (err) {
+        console.error('Lỗi localStorage sync:', err);
+      }
+
+      // 3. postMessage tới window.opener (nếu chưa bị ngắt kết nối cross-origin)
+      try {
+        if (window.opener && window.opener !== window) {
+          window.opener.postMessage(payload, '*');
+        }
+      } catch (err) {
+        console.error('Lỗi window.opener postMessage:', err);
+      }
+
+      // Tự động đóng tab callback này lại
+      setTimeout(() => {
+        window.close();
+      }, 600);
+    }
+  }, []);
+
+  // Lắng nghe sự kiện xác thực Meta từ tab/cửa sổ OAuth gửi về cho tab chính
+  useEffect(() => {
+    const handleAuthEvent = (data: { type?: string; message?: string }) => {
+      if (data?.type === 'FB_OAUTH_SUCCESS') {
+        showToast('Xác thực Meta thành công! Đang tải danh sách Fanpage...');
+        setIsConnectModalOpen(true);
+        fetchPages();
+      } else if (data?.type === 'FB_OAUTH_CANCEL') {
+        showToast('Bạn đã hủy liên kết Facebook.');
+        setIsConnectModalOpen(false);
+      } else if (data?.type === 'FB_OAUTH_ERROR') {
+        showToast(`Xác thực Meta thất bại: ${data.message || 'Lỗi không xác định'}`);
+      }
+    };
+
+    // 1. Lắng nghe window.postMessage
+    const onMessage = (event: MessageEvent) => {
+      handleAuthEvent(event.data);
+    };
+    window.addEventListener('message', onMessage);
+
+    // 2. Lắng nghe BroadcastChannel
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      channel = new BroadcastChannel('shopflow_oauth');
+      channel.onmessage = (event) => {
+        handleAuthEvent(event.data);
+      };
+    }
+
+    // 3. Lắng nghe localStorage sync event
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === 'shopflow_oauth_sync' && event.newValue) {
+        try {
+          const parsed = JSON.parse(event.newValue);
+          handleAuthEvent(parsed);
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('storage', onStorage);
+      if (channel) {
+        channel.close();
+      }
+    };
   }, [fetchPages]);
 
   const showToast = (msg: string) => {
@@ -64,7 +189,7 @@ export default function PagesManagementPage() {
     setIsConnectingOAuth(true);
     try {
       const res = await apiClient.get('/fb-oauth/connect-url');
-      const oauthUrl = res.data?.data?.url;
+      const oauthUrl = res.data?.data?.authUrl || res.data?.data?.url;
       if (oauthUrl) {
         // Mở popup OAuth Meta
         const width = 600;
@@ -76,9 +201,8 @@ export default function PagesManagementPage() {
           'MetaOAuth',
           `width=${width},height=${height},top=${top},left=${left}`
         );
+        showToast('Đang mở cửa sổ đăng nhập Meta Facebook...');
       }
-      // Đồng thời mở modal chọn page
-      setIsConnectModalOpen(true);
     } catch {
       showToast('Không thể kết nối Meta OAuth. Vui lòng thử lại.');
     } finally {
@@ -95,6 +219,22 @@ export default function PagesManagementPage() {
           : `Đã tạm dừng tiếp nhận cho ${page.pageName}`
       );
     }
+  };
+
+  const handleSubscribeWebhook = async (page: ConnectedPage) => {
+    try {
+      showToast(`Đang đồng bộ lại Webhook cho ${page.pageName}...`);
+      const res = await apiClient.post(`/pages/${page.pageId}/subscribe-webhook`);
+      if (res.data?.data?.webhook_subscribed) {
+        showToast(`✔ Đã đồng bộ Webhook thành công cho ${page.pageName}!`);
+        fetchPages();
+      } else {
+        showToast(`Chưa thể đồng bộ: ${res.data?.message || 'Thiếu quyền từ Facebook'}`);
+      }
+    } catch {
+      showToast('Lỗi khi gửi yêu cầu đồng bộ Webhook.');
+    }
+    setActiveMenuId(null);
   };
 
   const handleDisconnect = async (page: ConnectedPage) => {
@@ -117,6 +257,56 @@ export default function PagesManagementPage() {
   };
 
   const activePagesCount = pages.filter((p) => p.isActive).length;
+
+  if (oauthCallbackInfo) {
+    return (
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-4 bg-slate-950 text-white font-sans">
+        <div className="w-full max-w-sm p-8 bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+          {oauthCallbackInfo.status === 'success' ? (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
+                <Check className="w-7 h-7" />
+              </div>
+              <h2 className="text-lg font-bold text-white">Xác thực thành công!</h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Đã đồng bộ tài khoản Meta với ShopFlow. Cửa sổ này đang tự động đóng...
+              </p>
+            </>
+          ) : oauthCallbackInfo.status === 'cancel' ? (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10">
+                <AlertTriangle className="w-7 h-7" />
+              </div>
+              <h2 className="text-lg font-bold text-white">Đã hủy kết nối</h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Bạn đã hủy quá trình đăng nhập Facebook. Cửa sổ này đang tự động đóng...
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shadow-lg shadow-rose-500/10">
+                <AlertTriangle className="w-7 h-7" />
+              </div>
+              <h2 className="text-lg font-bold text-white">Xác thực không thành công</h2>
+              <p className="text-xs text-rose-300 leading-relaxed">
+                {oauthCallbackInfo.message || 'Có lỗi xảy ra khi xác thực với Meta.'}
+              </p>
+            </>
+          )}
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => window.close()}
+              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+            >
+              Đóng cửa sổ này
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
@@ -310,11 +500,11 @@ export default function PagesManagementPage() {
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-base flex items-center justify-center shadow-md shadow-blue-500/20">
-                          {page.pageName.charAt(0)}
+                          {(page.pageName || 'P').charAt(0).toUpperCase()}
                         </div>
                         <div className="min-w-0">
                           <h3 className="text-sm font-bold text-slate-900 truncate">
-                            {page.pageName}
+                            {page.pageName || 'Fanpage'}
                           </h3>
                           <p className="text-xs text-slate-400 truncate">
                             {page.category || 'Trang kinh doanh'}
@@ -346,6 +536,17 @@ export default function PagesManagementPage() {
                               <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
                               <span>Vào Hộp Thư</span>
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMemberModalPage(page);
+                                setActiveMenuId(null);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 text-left"
+                            >
+                              <Users className="w-3.5 h-3.5 text-purple-600" />
+                              <span>Thành viên & Phân quyền</span>
+                            </button>
                             <Link
                               href="/automation"
                               onClick={() => setActiveMenuId(null)}
@@ -355,6 +556,14 @@ export default function PagesManagementPage() {
                               <span>Cấu hình Bot</span>
                             </Link>
                             <div className="my-1 border-t border-slate-100" />
+                            <button
+                              type="button"
+                              onClick={() => handleSubscribeWebhook(page)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 text-left"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Đồng bộ lại Webhook</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDisconnect(page)}
@@ -401,10 +610,15 @@ export default function PagesManagementPage() {
                           <span>Đang đồng bộ Webhook</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[11px] font-medium border border-amber-200/60">
-                          <AlertTriangle className="w-3 h-3 text-amber-600" />
-                          <span>Cần cấp lại Token</span>
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleSubscribeWebhook(page)}
+                          title="Bấm để kích hoạt Webhook đồng bộ tự động với Facebook"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-medium border border-amber-200/80 transition-colors cursor-pointer group/btn"
+                        >
+                          <RefreshCw className="w-3 h-3 text-amber-600 group-hover/btn:rotate-180 transition-transform duration-300" />
+                          <span>Chưa bật Webhook (Bấm để thử lại)</span>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -432,14 +646,24 @@ export default function PagesManagementPage() {
                       </span>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleEnterInbox(page)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
-                    >
-                      <span>Vào Hộp Thư</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setMemberModalPage(page)}
+                        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-purple-600 transition-colors"
+                      >
+                        <Users className="w-3.5 h-3.5 text-purple-500" />
+                        <span>Thành viên</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleEnterInbox(page)}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        <span>Vào Hộp Thư</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -478,6 +702,14 @@ export default function PagesManagementPage() {
           fetchPages();
           showToast('Đã kết nối và đồng bộ Fanpage thành công!');
         }}
+      />
+
+      {/* Page Members & RBAC Modal */}
+      <PageMembersModal
+        isOpen={Boolean(memberModalPage)}
+        pageId={memberModalPage?.pageId || memberModalPage?.id || ''}
+        pageName={memberModalPage?.pageName || 'Fanpage'}
+        onClose={() => setMemberModalPage(null)}
       />
     </div>
   );
